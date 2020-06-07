@@ -1,0 +1,217 @@
+#!/usr/bin/python3
+
+from string import *
+import sys
+#import argparse
+import optparse
+import xlsxwriter
+
+def addOptions(parser):
+    parser.add_option("-f", "--file", \
+            dest="filename", type="string", \
+            default='./m5out/stats.txt', \
+            help = """The statisic file for \
+            input that includes loops""")
+    parser.add_option("-s", "--sacle-factor", \
+            dest="scale_factor", type="float", \
+            default = 1, \
+            help = "The speed up of a larger core")
+    parser.add_option("-n", "--core-num", \
+        dest="n", type="int", \
+        default = 1, \
+        help ="""The number ofcores in cpu""")
+
+def is_stat(line):
+    return (line[0] != '-' and line[0] != ' ' and line[0] != '\n')
+
+def split_stat(stat):
+    stat_sections = stat.split()
+    return stat_sections
+
+def find_next_time_slot(f):
+    num = 0
+    while True:
+        num += 1
+        line = f.readline();
+        if not line:
+            print("line passed" + str(num))
+            print("reached the end of the file while finding next time slot")
+            return False
+        split_line = line.split()
+        if (len(split_line) > 1 and "final_tick" == split_line[0]):
+            print("line passed" +  str(num))
+            print("found the next time slot, the line is: " + line)
+            return True
+
+def find_sim_seconds(f):
+    num = 0
+    while True:
+        num += 1
+        line = f.readline();
+        if not line:
+            print("line passed" + str(num))
+            print("reached the end of the file while finding next time slot")
+            return False
+        split_line = line.split()
+        if (len(split_line) > 1 and "sim_seconds" == split_line[0]):
+            print("line passed" +  str(num))
+            print("found the sim_seconds, the line is: " + line)
+            return float(split_line[1])
+
+def find_sim_ticks(f):
+    num = 0
+    while True:
+        num += 1
+        line = f.readline();
+        if not line:
+            print("line passed" + str(num))
+            print("reached the end of the file while finding next time slot")
+            return False
+        split_line = line.split()
+        if (len(split_line) > 1 and "sim_ticks" == split_line[0]):
+            print("line passed" +  str(num))
+            print("found the sim_ticks, the line is: " + line)
+            return float(split_line[1])
+
+
+def find_next_cpu(f, n): # n means we want to find cpu n
+    while True:
+        line = f.readline();
+        if not line:
+            print("reached the end of the file while finding next time slot")
+            break;
+        if (is_stat(line)):
+            stats = split_stat(line)
+            name_sections = stats[0].split('.')
+            #print(name_sections)
+            if (len(name_sections) > 1 and ("cpu" + str(n)) == name_sections[1]):
+                print("found cpu" + str(n) + "in line: " + line)
+                return
+
+def find_criticality(f):
+    while True:
+        line = f.readline();
+        if not line:
+            print("reached the end of the file while finding next time slot")
+            break;
+        if is_stat(line):
+            stats = split_stat(line)
+            name = stats[0]
+            value = stats[1]
+            name_sections = name.split('.')
+            #print(name_sections)
+            if (len(name_sections) > 2 and name_sections[2] == "Criticality"):
+                #print("criticality type", int(value), type(int(value)))
+                return int(value)
+    return 0
+
+
+def find_committedInsts(f):
+    while True:
+        line = f.readline();
+        if not line:
+            print("reached the end of the file while finding next time slot")
+            break;
+        if is_stat(line):
+            stats = split_stat(line)
+            name = stats[0]
+            value = stats[1]
+            name_sections = name.split('.')
+            if (len(name_sections) > 2 and name_sections[2] == "committedInsts"):
+                return int(value)
+
+       
+
+
+
+
+###Start of Script
+parser = optparse.OptionParser()
+addOptions(parser)
+(options, args) = parser.parse_args()
+filepath = options.filename
+
+print("reading from file: " + filepath)
+f = open(filepath, "r")
+workbook = xlsxwriter.Workbook('output_criticality.xlsx')
+worksheet1 = workbook.add_worksheet()
+worksheet2 = workbook.add_worksheet()
+n = options.n
+
+Criticality = []
+for i in range(0, n):
+    Criticality.append([])
+InstNum = []
+for i in range(0, n):
+    InstNum.append([])
+
+sim_seconds = []
+sim_ticks = []
+section = 0
+
+while True:
+     if not find_next_time_slot(f):
+         print("going out of the while loop")
+         break
+     sim_seconds.append(find_sim_seconds(f))
+     sim_ticks.append(find_sim_ticks(f))
+     for i in range(0, n):
+         print("finding cpu" + str(i))
+         #find_next_cpu(f, i)
+         c = find_criticality(f)
+         #print("inserted criticality", c, type(c))
+         inst = find_committedInsts(f)
+         #print("inserted InstNum", inst, type(inst))
+         Criticality[i].append(c)
+         InstNum[i].append(inst)
+     section += 1
+### Calculate the speed up now
+
+###write to the xlsx file
+for i in range(0, n):
+    row = 1
+    worksheet1.write_string(0, 2+i*3, "Criticality")
+    worksheet1.write_string(0, 2+i*3+1, "InstNUm")
+    worksheet1.write_string(0, 2+i*3+2, "Average active core number")
+    worksheet1.write_string(0, 0, "sim_seconds")
+    worksheet1.write_string(0, 1, "sim_ticks")
+    #prev_sec = 0.0
+    for sim_second in sim_seconds:
+        worksheet1.write_number(row, 0, sim_second)
+        #prev_sec = sim_second
+        row += 1
+    row = 1
+    prev_tick = 0
+    for sim_tick in sim_ticks:
+        worksheet1.write_number(row, 1, sim_tick - prev_tick)
+        prev_tick = sim_tick
+        row += 1
+    row = 1
+    prev_cri = 0
+    for criticality in Criticality[i]:
+        cri = 0
+        #print(Criticality, type(criticality))
+        if criticality - prev_cri > 0:
+            cri = criticality - prev_cri
+        else:
+            cri = 0
+        worksheet1.write_number(row, 2+3*i, cri)
+        prev_cri = criticality
+        row += 1
+    row = 1
+    prev_inst = 0
+    for instnum in InstNum[i]:
+        inst = 0
+        if instnum - prev_inst > 0:
+            inst = instnum - prev_inst
+        else:
+            inst = 0
+        worksheet1.write_number(row, 2+3*i+1, inst)
+        prev_inst = instnum
+        row +=1
+    #row = 1
+    #for j in range(0, len(InstNum)):
+    #    worksheet1.write_number(row, 3*i+2, Criticality[i][j]/InstNum[i][j])
+
+workbook.close()
+f.close()
