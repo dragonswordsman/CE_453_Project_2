@@ -20,6 +20,16 @@ def addOptions(parser):
         dest="n", type="int", \
         default = 1, \
         help ="""The number ofcores in cpu""")
+    parser.add_option("-o", "--o3-IPS", \
+        dest="o3_IPS", type="int", \
+        default = 1, \
+        help ="""Instruction per Second for o3 cpu""")
+    parser.add_option("-p", "--simple-IPS", \
+        dest="simple_IPS", type="int", \
+        default = 1, \
+        help ="""Instruction per Second for timing simple cpu""")
+
+
 
 def is_stat(line):
     return (line[0] != '-' and line[0] != ' ' and line[0] != '\n')
@@ -136,6 +146,7 @@ f = open(filepath, "r")
 workbook = xlsxwriter.Workbook('output_criticality.xlsx')
 worksheet1 = workbook.add_worksheet()
 worksheet2 = workbook.add_worksheet()
+worksheet3 = workbook.add_worksheet()
 n = options.n
 
 Criticality = []
@@ -166,6 +177,15 @@ while True:
          InstNum[i].append(inst)
      section += 1
 ### Calculate the speed up now
+Cris = [] #Criticality for each time slot, not accumulated
+Insts = [] #Instruction num
+Ticks = []
+Secs = []
+
+for i in range(0, n):
+    Cris.append([])
+for i in range(0, n):
+    Insts.append([])
 
 ###write to the xlsx file
 for i in range(0, n):
@@ -175,18 +195,6 @@ for i in range(0, n):
     worksheet1.write_string(0, 2+i*3+2, "Average active core number")
     worksheet1.write_string(0, 0, "sim_seconds")
     worksheet1.write_string(0, 1, "sim_ticks")
-    #prev_sec = 0.0
-    for sim_second in sim_seconds:
-        worksheet1.write_number(row, 0, sim_second)
-        #prev_sec = sim_second
-        row += 1
-    row = 1
-    prev_tick = 0
-    for sim_tick in sim_ticks:
-        worksheet1.write_number(row, 1, sim_tick - prev_tick)
-        prev_tick = sim_tick
-        row += 1
-    row = 1
     prev_cri = 0
     for criticality in Criticality[i]:
         cri = 0
@@ -196,6 +204,7 @@ for i in range(0, n):
         else:
             cri = 0
         worksheet1.write_number(row, 2+3*i, cri)
+        Cris[i].append(cri)
         prev_cri = criticality
         row += 1
     row = 1
@@ -207,11 +216,63 @@ for i in range(0, n):
         else:
             inst = 0
         worksheet1.write_number(row, 2+3*i+1, inst)
+        Insts[i].append(inst)
         prev_inst = instnum
         row +=1
+row = 1
+prev_sec = 0.0
+for sim_second in sim_seconds:
+    worksheet1.write_number(row, 0, sim_second)
+    #if (sim_second - prev_sec > 0):
+    Secs.append(sim_second - prev_sec)
+    prev_sec = sim_second
+    row += 1
+row = 1
+prev_tick = 0
+for sim_tick in sim_ticks:
+    worksheet1.write_number(row, 1, sim_tick - prev_tick)
+    #if (sim_tick - prev_tick > 0):
+    Ticks.append(sim_tick - prev_tick)
+    prev_tick = sim_tick
+    row += 1
+
     #row = 1
     #for j in range(0, len(InstNum)):
     #    worksheet1.write_number(row, 3*i+2, Criticality[i][j]/InstNum[i][j])
+
+#Real Calculation starts here:
+scale_factor = options.scale_factor
+o3_IPS = options.o3_IPS
+simple_IPS = options.simple_IPS
+ACC_T = []
+for i in range(0, len(Cris[0])):
+    C = []
+    I = []
+    C_s = []
+    I_s = []
+
+    for j in range(0, n):
+        C.append(Cris[j][i])
+        C_s.append(Cris[j][i])
+        I.append(Insts[j][i])
+        I_s.append(Insts[j][i])
+
+    C_s.sort()
+    Max_C = C_s[-1]
+    Second_Max_c = C_s[-2]
+    Max_C_idx = C.index(Max_C)
+    Second_Max_c_idx = C.index(Second_Max_c)
+
+    acc_time = float(I[Max_C_idx])/float(o3_IPS)
+    second_time = float(I[Second_Max_c_idx])/float(simple_IPS)
+    ACC_T.append(max(acc_time, second_time))
+
+worksheet3.write_string(0, 0, "Original time")
+worksheet3.write_string(0, 1, "Accelerated time")
+
+for i in range(0, len(ACC_T)):
+    worksheet3.write_number(i+1, 0, Secs[i])
+    worksheet3.write_number(i+1, 1, ACC_T[i])
 
 workbook.close()
 f.close()
